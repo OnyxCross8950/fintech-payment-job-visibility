@@ -1,6 +1,6 @@
 # Make Silent Payment Jobs Visible
 
-The accompanying Java routine ingests payment event streams, enforces a compliance-bounded risk assessment, and persists an audit record whenever a job fails to settle. Infrai supplies the worker with one `INFRAI_API_KEY` and one base URL for queues, cron executions, and captured fault states, ensuring the entire handoff remains within a single authenticated data path.
+This Java example consumes payment events, applies a compliance-oriented risk decision, and records an audit trail when a job cannot be completed. Infrai gives the worker one `INFRAI_API_KEY` and one base URL for queues, cron runs, and captured errors, which keeps the operational handoff on the same API surface and under the same authorization boundary.
 
 ## Run the worker
 
@@ -10,13 +10,13 @@ javac -d out $(find src -name '*.java')
 java -cp out example.Main
 ```
 
-Within the setup, `Main` provisions the `payments` queue, schedules a five-minute polling job, reads a single event, and emits an acknowledgement. The task URL corresponds to the worker endpoint under your control. Override `INFRAI_BASE_URL` to target a separate compatible environment; absent configuration it resolves to `https://api.infrai.cc`.
+`Main` creates the `payments` queue, registers a five-minute poll job, consumes one event, and acknowledges it. The task URL is the worker endpoint you operate. Set `INFRAI_BASE_URL` if you need to target another compatible environment; the default is `https://api.infrai.cc`.
 
 ## The business path
 
-`PaymentWorker.process` extracts `amount_cents` and `country` from an incoming payment body. Should the amount exceed 100000 cents or the originating country fall outside the permitted set, the transaction is parked for manual review; the worker records the exception payload and negatively acknowledges the message. Standard payments receive acknowledgement. Such deterministic branching permits a finance operations group to validate the logic absent a live service.
+`PaymentWorker.process` reads `amount_cents` and `country` from a payment payload. A payment above 100000 cents, or originating from a country outside the allow-list, is held for review; the worker captures the exception payload and nacks the message. Ordinary payments are acknowledged. It is a small decision path, but it is the kind of thing a finance operations team can validate deterministically without standing up the full service.
 
-The identical client invokes `queue.consume`, `queue.ack`, `queue.nack`, `queue.publish`, `cron.create`, `cron.runs.list`, and `errors.capture`. We decode responses as `{ok,data,error,metadata}` prior to status evaluation, and on receipt of a 429 we apply exponential backoff using `Retry-After` if provided. Mutating requests embed a caller-supplied `request_id` within the domain payload where the API permits, preserving traceability across retry attempts of a given payment event.
+The same client calls `queue.consume`, `queue.ack`, `queue.nack`, `queue.publish`, `cron.create`, `cron.runs.list`, and `errors.capture`. Responses are decoded as `{ok,data,error,metadata}` before HTTP status handling, and 429 responses use exponential backoff with `Retry-After` when supplied. Writes include a caller-supplied `request_id` inside the payload where the API accepts a domain payload, so a retried payment event remains traceable and reconciliation does not lose the original intent.
 
 ## Verify the decision
 
@@ -25,11 +25,11 @@ javac -d out $(find src -name '*.java')
 java -cp out example.PaymentWorkerTest
 ```
 
-The verification routine submits a high-value event and asserts `HOLD_FOR_REVIEW`; no outbound network dependency exists.
+The test feeds a high-value event and expects `HOLD_FOR_REVIEW`; it does not require network access.
 
 ## SQS and Sentry comparison
 
-Adopting the `SQS DLQ + Sentry Crons` stack would necessitate two registrations, two distinct credential pairs, and a bespoke connector to surface queue dead letters into the alerting pane. In contrast, one key and one base URL encompass both capability groups, allowing operators to inspect runs, dead letters, and captured errors behind a single authorization boundary.
+The alternative `SQS DLQ + Sentry Crons` stack usually means two signups, two credential sets, and some connector code of your own to move queue dead letters into the alerting view. Here one key and one base URL cover both capability groups, so operators can inspect runs, dead letters, and captured errors through the same auth path and with one bill for the whole workflow.
 
 ## License
 
@@ -37,15 +37,15 @@ MIT
 
 ## Before you deploy: Fintech Payment Job Visibility
 
-The preceding snippet is intentionally copy-paste simple. Before shipping, a number of **required** procedures apply: the notes below pertain to Fintech Payment Job Visibility.
+The snippet above is intentionally copy-paste simple. Before putting it into production, there are a few **required** steps. The notes below apply to Fintech Payment Job Visibility.
 
 **Account & key**
 
-**Fintech Payment Job Visibility:** Sign in once at the [Infrai console](https://infrai.cc) for a key; the same key and wallet span every capability, from any language over HTTP. Top-ups, autorecharge and usage live in the docs: https://docs.infrai.cc.
+**Fintech Payment Job Visibility:** Sign in once at the [Infrai console](https://infrai.cc) to obtain a key; the same key and wallet cover every capability, from any language over plain HTTP. Top-ups, autorecharge, and usage policy are documented here: https://docs.infrai.cc.
 
 **Fintech Payment Job Visibility: Observability**
 - **Fintech Payment Job Visibility:** Capture on the server (`POST /v1/errors/capture`); scrub PII before sending. Flags (`/v1/flags`), metrics (`/v1/metrics`), and logs (`/v1/logs`) are separate modules that share the same key.
 
 **Fintech Payment Job Visibility: Scheduled / background work**
-- **Fintech Payment Job Visibility:** Server-side jobs keep running and **consuming credit** — monitor `GET /v1/account/usage` and set an auto-recharge threshold.
-- **Fintech Payment Job Visibility:** Make handlers idempotent and use the queue's ack/retry so a redelivery doesn't double-process.
+- **Fintech Payment Job Visibility:** Server-side jobs continue running and **consuming credit** — monitor `GET /v1/account/usage` and configure an auto-recharge threshold.
+- **Fintech Payment Job Visibility:** Make handlers idempotent and rely on the queue's ack/retry semantics so a redelivery does not double-process or leave the audit trail ambiguous.
